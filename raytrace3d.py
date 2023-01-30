@@ -1,4 +1,11 @@
-def rhsf_3d(l, r, slowness, dsdx, dsdz, dsdy, xaxis, yaxis, zaxis, dx, dy, dz):
+# Raytrace 3D
+import numpy as np
+import scipy as sp
+import pandas as pd
+from math import sin, cos
+from scipy.integrate import solve_ivp
+## RHS
+def rhsf_3d(l, r, slowness, dsdx, dsdy, dsdz, xaxis, yaxis, zaxis, dx, dy, dz):
     """Right-hand side of the ODE for 3D raytracing.
     
     Parameters
@@ -6,7 +13,7 @@ def rhsf_3d(l, r, slowness, dsdx, dsdz, dsdy, xaxis, yaxis, zaxis, dx, dy, dz):
     l : float
         Independent variable (ray length)
     r : np.ndarray
-        Dependent variables (x, y, z, px, py, pz)
+        Dependent variables (x, y, z, px, py, pz, t)
     slowness : np.ndarray
         Slowness model (nz x ny x nx)
     dsdx : np.ndarray
@@ -33,7 +40,8 @@ def rhsf_3d(l, r, slowness, dsdx, dsdz, dsdy, xaxis, yaxis, zaxis, dx, dy, dz):
     drdt : np.ndarray
         Time derivatives of the dependent variables
     """
-    x, y, z, px, py, pz = r
+    x, y, z, px, py, pz = r[:6]
+
     ix = np.argmin(np.abs(xaxis - x))
     iy = np.argmin(np.abs(yaxis - y))
     iz = np.argmin(np.abs(zaxis - z))
@@ -41,10 +49,10 @@ def rhsf_3d(l, r, slowness, dsdx, dsdz, dsdy, xaxis, yaxis, zaxis, dx, dy, dz):
     dsdx = dsdx[iz, iy, ix]
     dsdy = dsdy[iz, iy, ix]
     dsdz = dsdz[iz, iy, ix]
-
     drdt = [px, py, pz, -dsdx * px / s, -dsdy * py / s, -dsdz * pz / s]
-    return drdt
 
+    return drdt
+## Events
 def event_left(l, r, slowness, dsdx, dsdz, xaxis, zaxis, dx, dz):
     return r[0]-xaxis[0]
 def event_right(l, r, slowness, dsdx, dsdz, xaxis, zaxis, dx, dz):
@@ -58,19 +66,10 @@ def event_back(l, r, slowness, dsdx, dsdy, dsdz, xaxis, yaxis, zaxis, dx, dy, dz
 def event_front(l, r, slowness, dsdx, dsdy, dsdz, xaxis, yaxis, zaxis, dx, dy, dz):
     return yaxis[-1]-r[2]
 
-event_left.terminal = True
-event_left.direction = -1
-event_right.terminal = True
-event_right.direction = -1
-event_top.terminal = True
-event_top.direction = -1
-event_bottom.terminal = True
-event_bottom.direction = -1
-event_back.terminal = True 
-event_back.direction = -1 
-event_front.terminal = True 
-event_front.direction = -1 
-
+for evt in [event_left, event_right, event_top, event_bottom, event_back, event_front]:
+    evt.terminal = True
+    evt.direction = -1
+## Raytrace
 def raytrace3D(vel, xaxis, yaxis, zaxis, dx, dy, dz, lstep, source, thetas, phis):
     """Raytracing for multiple rays defined by the initial conditions (source, thetas, phis)
     
@@ -102,23 +101,37 @@ def raytrace3D(vel, xaxis, yaxis, zaxis, dx, dy, dz, lstep, source, thetas, phis
     # Slowness and its spatial derivatives
     slowness = 1./vel
     [dsdz, dsdy, dsdx] = np.gradient(slowness, dz, dy, dx)
-    
+    df = pd.DataFrame(columns = ['Source', 'Theta', 'rx', 'ry', 'rz'])
     for theta in thetas:
         for phi in phis:
             # Initial condition
             r0=[source[0], source[1], source[2],
                 sin(theta * np.pi / 180) * cos(phi * np.pi / 180) / vel[izs, iys, ixs],
                 sin(theta * np.pi / 180) * sin(phi * np.pi / 180) / vel[izs, iys, ixs],
-                cos(theta * np.pi / 180) / vel[izs, iys, ixs], 0]
+                cos(theta * np.pi / 180) / vel[izs, iys, ixs]]
             
             # Solve ODE
             sol = solve_ivp(rhsf_3d, [lstep[0], lstep[-1]], r0, t_eval=lstep, 
                             args=(slowness, dsdx, dsdy, dsdz, x, y, z, dx, dy, dz),
                             events=[event_right, event_left, event_top, event_bottom, event_back, event_front])
             r = sol['y'].T
-    
-    return r
+            # Ray coord
+            rx, ry, rz = r[:,0]/1000, r[:,1]/1000, r[:,2]/1000
 
+            for a in range(rx.size):
+                append = pd.Series(
+                    {
+                        'Source':source,
+                        'Theta':theta,
+                        'rx':rx[a],
+                        'rx':ry[a],
+                        'rz':rz[a],
+                        't':t[a]
+                    }
+                )
+                df = pd.concat([df, append.to_frame().T], ignore_index=True)
+    return df
+## Example
 # Spatial axes
 dx, dy, dz,  = 100, 100, 100
 x = np.arange(0, 10000, dx)
