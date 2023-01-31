@@ -41,25 +41,42 @@ def rhsf_3d(l, r, slowness, dsdx, dsdy, dsdz, xaxis, yaxis, zaxis, dx, dy, dz):
         Time derivatives of the dependent variables
     """
     x, y, z, px, py, pz = r[:6]
+    m, n, p = slowness.shape
+    drdt = np.zeros(len(r))
 
-    ix = np.argmin(np.abs(xaxis - x))
-    iy = np.argmin(np.abs(yaxis - y))
-    iz = np.argmin(np.abs(zaxis - z))
-    s = slowness[iz, iy, ix]
-    dsdx = dsdx[iz, iy, ix]
-    dsdy = dsdy[iz, iy, ix]
-    dsdz = dsdz[iz, iy, ix]
-    drdt = [px, py, pz, -dsdx * px / s, -dsdy * py / s, -dsdz * pz / s]
+    xx = (x - xaxis[0]) // dx
+    yy = (y - yaxis[0]) // dy
+    zz = (z - zaxis[0]) // dz
+    xx = min([xx, n-1])
+    xx = max([xx, 1])
+    yy = min([yy, m-1])
+    yy = max([yy, 1])
+    zz = min([zz, p-1])
+    zz = max([zz, 1]) 
+
+    # extract s, ds/dx, ds/dz at current position (nearest-neighbour interpolation)
+    s = slowness[round(zz), round(xx), round(yy)]
+    dsdx = dsdx[round(zz), round(xx), round(yy)]
+    dsdy = dsdy[round(zz), round(xx), round(yy)]
+    dsdz = dsdz[round(zz), round(xx), round(yy)]
+
+    drdt[0] = px/s
+    drdt[1] = py/s
+    drdt[2] = pz/s
+    drdt[3] = dsdx
+    drdt[4] = dsdy
+    drdt[5] = dsdz
+    drdt[6] = s
 
     return drdt
 ## Events
-def event_left(l, r, slowness, dsdx, dsdz, xaxis, zaxis, dx, dz):
+def event_left(l, r, slowness, dsdx, dsdy, dsdz, xaxis, yaxis, zaxis, dx, dy, dz):
     return r[0]-xaxis[0]
-def event_right(l, r, slowness, dsdx, dsdz, xaxis, zaxis, dx, dz):
+def event_right(l, r, slowness, dsdx, dsdy, dsdz, xaxis, yaxis, zaxis, dx, dy, dz):
     return xaxis[-1]-r[0]
-def event_top(l, r, slowness, dsdx, dsdz, xaxis, zaxis, dx, dz):
+def event_top(l, r, slowness, dsdx, dsdy, dsdz, xaxis, yaxis, zaxis, dx, dy, dz):
     return r[1]-zaxis[0]
-def event_bottom(l, r, slowness, dsdx, dsdz, xaxis, zaxis, dx, dz):
+def event_bottom(l, r, slowness, dsdx, dsdy, dsdz, xaxis, yaxis, zaxis, dx, dy, dz):
     return zaxis[-1]-r[1]
 def event_back(l, r, slowness, dsdx, dsdy, dsdz, xaxis, yaxis, zaxis, dx, dy, dz):
     return r[2]-yaxis[0]
@@ -108,35 +125,36 @@ def raytrace3D(vel, xaxis, yaxis, zaxis, dx, dy, dz, lstep, source, thetas, phis
             r0=[source[0], source[1], source[2],
                 sin(theta * np.pi / 180) * cos(phi * np.pi / 180) / vel[izs, iys, ixs],
                 sin(theta * np.pi / 180) * sin(phi * np.pi / 180) / vel[izs, iys, ixs],
-                cos(theta * np.pi / 180) / vel[izs, iys, ixs]]
+                cos(theta * np.pi / 180) / vel[izs, iys, ixs], 0]
             
             # Solve ODE
             sol = solve_ivp(rhsf_3d, [lstep[0], lstep[-1]], r0, t_eval=lstep, 
                             args=(slowness, dsdx, dsdy, dsdz, x, y, z, dx, dy, dz),
                             events=[event_right, event_left, event_top, event_bottom, event_back, event_front])
             r = sol['y'].T
+            t = sol['t'].T
             # Ray coord
             rx, ry, rz = r[:,0]/1000, r[:,1]/1000, r[:,2]/1000
 
-            for a in range(rx.size):
-                append = pd.Series(
-                    {
-                        'Source':source,
-                        'Theta':theta,
-                        'rx':rx[a],
-                        'rx':ry[a],
-                        'rz':rz[a],
-                        't':t[a]
-                    }
-                )
-                df = pd.concat([df, append.to_frame().T], ignore_index=True)
+        for a in range(rx.size):
+            append = pd.Series(
+                {
+                    'Source':source,
+                    'Theta':theta,
+                    'rx':rx[a],
+                    'rx':ry[a],
+                    'rz':rz[a],
+                    't':t[a]
+                }
+            )
+            df = pd.concat([df, append.to_frame().T], ignore_index=True)
     return df
 ## Example
 # Spatial axes
 dx, dy, dz,  = 100, 100, 100
-x = np.arange(0, 10000, dx)
-y = np.arange(0, 10000, dy)
-z = np.arange(0, 10000, dz)
+x = np.arange(0, 1000, dx)
+y = np.arange(0, 1000, dy)
+z = np.arange(0, 1000, dz)
 
 [xx, yy, zz]= np.meshgrid(x, y, z, indexing='ij')
 
